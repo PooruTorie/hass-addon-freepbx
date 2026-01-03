@@ -1,0 +1,29 @@
+#!/usr/bin/with-contenv bashio
+set -euo pipefail
+
+# Netdata ist optional; FreePBX braucht es nicht zwingend.
+# In (manchen) Debian/FreePBX-Images versucht Netdata per Default auf MariaDB zuzugreifen
+# und erzeugt dann "Access denied for user 'netdata'@'localhost' (using password: NO)".
+# Wir deaktivieren den MySQL/MariaDB-Collector hier explizit, um Logspam zu vermeiden.
+
+bashio::log.info "Netdata: starte (MySQL Collector deaktiviert)..."
+
+# Stelle sicher, dass die Disable-Datei existiert.
+# Netdata liest u.a. /etc/netdata/python.d/mysql.conf; wenn enabled=no, unterlaesst es die DB-Checks.
+mkdir -p /etc/netdata/python.d
+cat >/etc/netdata/python.d/mysql.conf <<'EOF'
+# Managed by HA add-on container
+# Disable MySQL/MariaDB collector to avoid auth noise in MariaDB logs.
+local:
+  enabled: no
+EOF
+
+# Falls netdata nicht installiert ist, nicht hard-failen.
+if ! command -v netdata >/dev/null 2>&1; then
+  bashio::log.info "Netdata: binary nicht vorhanden, ueberspringe."
+  exit 0
+fi
+
+# netdata im foreground starten (damit s6 es managen kann)
+exec netdata -D
+

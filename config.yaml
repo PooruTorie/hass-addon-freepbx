@@ -1,0 +1,71 @@
+# https://developers.home-assistant.io/docs/add-ons/configuration#add-on-config
+name: FreePBX
+version: "0.1.8"
+slug: freepbx17
+description: "FreePBX als Home Assistant OS Add-on"
+url: "https://github.com/PooruTorie/hass-addon-freepbx"
+arch:
+  - amd64
+init: false
+startup: services
+backup: cold
+
+ingress: true
+ingress_port: 80
+ingress_entry: admin/
+panel_icon: "mdi:phone"
+panel_title: "FreePBX"
+
+# Für SIP/RTP ist host_network in der Praxis am robustesten (RTP-Range, Discovery, etc.)
+host_network: false
+
+# FreePBX benötigt i.d.R. CAP_NET_ADMIN (iptables) und ggf. weitere, wir halten's minimal.
+# Falls etwas fehlt, kann man später erweitern.
+privileged:
+  - NET_ADMIN
+
+map:
+  - data:rw
+
+watchdog: http://[HOST]:[PORT:80]/
+
+ports:
+  80/tcp: 8080
+  443/tcp: 8443
+  5060/udp: 5060
+  5060/tcp: 5060
+  5160/udp: 5160
+  18000/udp: 18000
+
+ports_description:
+  80/tcp: "FreePBX Web UI (HTTP)"
+  5060/udp: "SIP (chan_sip / PJSIP je nach Konfig)"
+  5060/tcp: "SIP TCP"
+  5160/udp: "SIP (CHAN_SIP Alternative)"
+  18000/udp: "Beispiel RTP-Port (bei host_network meist irrelevant)"
+
+options:
+  admin_user: admin
+  admin_password: ""
+  db_root_password: ""
+  db_name: asterisk
+  db_user: asteriskuser
+  db_password: ""
+  asterisk_version: 22
+  opensource_only: true
+  auto_cleanup_mysql_datadir: false
+  php_debug: false
+  apache_debug: false
+
+schema:
+  admin_user: str
+  admin_password: password?
+  db_root_password: password?
+  db_name: str
+  db_user: str
+  db_password: password?
+  asterisk_version: int(18,25)
+  opensource_only: bool
+  auto_cleanup_mysql_datadir: bool
+  php_debug: bool
+  apache_debug: bool

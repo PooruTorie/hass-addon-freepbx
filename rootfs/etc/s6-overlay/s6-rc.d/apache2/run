@@ -1,0 +1,157 @@
+#!/usr/bin/with-contenv bashio
+set -euo pipefail
+
+bashio::log.info "Starte Apache (s6-rc)..."
+
+# Ensure dirs exist (Debian layout)
+mkdir -p /etc/apache2/mods-enabled /etc/apache2/conf-enabled /etc/apache2/sites-enabled /etc/apache2/sites-available
+
+# Use a single known vhost to guarantee logging to s6 console
+rm -f /etc/apache2/sites-enabled/*.conf || true
+if [ -f /etc/apache2/sites-available/zzz-ha-single.conf ]; then
+  ln -sf ../sites-available/zzz-ha-single.conf /etc/apache2/sites-enabled/zzz-ha-single.conf
+fi
+
+enable_mod() {
+  local name="$1"
+  if [ -e "/etc/apache2/mods-available/${name}.load" ]; then
+    ln -sf "../mods-available/${name}.load" "/etc/apache2/mods-enabled/${name}.load"
+  fi
+  if [ -e "/etc/apache2/mods-available/${name}.conf" ]; then
+    ln -sf "../mods-available/${name}.conf" "/etc/apache2/mods-enabled/${name}.conf"
+  fi
+}
+
+# Ensure modules required for access logging + FreePBX are present
+enable_mod log_config
+enable_mod rewrite
+enable_mod headers
+# Ensure mod_php is enabled (image installs libapache2-mod-php8.2)
+enable_mod php8.2
+
+# Common basics (usually enabled anyway)
+enable_mod alias
+enable_mod dir
+enable_mod mime
+enable_mod env
+enable_mod setenvif
+enable_mod unixd
+
+# Ensure prefork MPM for mod_php
+rm -f /etc/apache2/mods-enabled/mpm_event.* /etc/apache2/mods-enabled/mpm_worker.* || true
+enable_mod mpm_prefork
+
+# Enable our conf snippets for logging + PHP errors (idempotent)
+if [ -f /etc/apache2/conf-available/zzz-ha-logs.conf ]; then
+  ln -sf "../conf-available/zzz-ha-logs.conf" /etc/apache2/conf-enabled/zzz-ha-logs.conf
+fi
+if [ -f /etc/apache2/conf-available/zzz-ha-php-errors.conf ]; then
+  ln -sf "../conf-available/zzz-ha-php-errors.conf" /etc/apache2/conf-enabled/zzz-ha-php-errors.conf
+fi
+
+# Enable extra PHP trace logging
+if [ -f /etc/apache2/conf-available/zzz-ha-php-trace.conf ]; then
+  ln -sf "../conf-available/zzz-ha-php-trace.conf" /etc/apache2/conf-enabled/zzz-ha-php-trace.conf
+fi
+
+# Disable Debian default vhost access log to file (we want stdout only)
+rm -f /etc/apache2/conf-enabled/other-vhosts-access-log.conf || true
+
+# Ensure global ServerName to suppress AH00558
+if [ -f /etc/apache2/conf-available/servername.conf ]; then
+  ln -sf ../conf-available/servername.conf /etc/apache2/conf-enabled/servername.conf
+fi
+
+# Optional ultra-verbose IO debugging (helps if CustomLog is not producing output)
+# Enable only if explicitly requested
+if [ "${APACHE_DUMPIO:-0}" = "1" ]; then
+  bashio::log.warning "Apache: dumpio debugging enabled (APACHE_DUMPIO=1)"
+  enable_mod dumpio
+  if [ -f /etc/apache2/conf-available/zzz-ha-debug-io.conf ]; then
+    ln -sf "../conf-available/zzz-ha-debug-io.conf" /etc/apache2/conf-enabled/zzz-ha-debug-io.conf
+  fi
+else
+  rm -f /etc/apache2/conf-enabled/zzz-ha-debug-io.conf || true
+fi
+
+# Apache envvars are important on Debian
+: "${APACHE_CONFDIR:=/etc/apache2}"
+export APACHE_CONFDIR
+if [ -f /etc/apache2/envvars ]; then
+  set +u
+  # shellcheck disable=SC1091
+  . /etc/apache2/envvars
+  set -u
+fi
+
+# Fallback defaults, falls envvars nicht geladen werden konnte.
+: "${APACHE_RUN_DIR:=/var/run/apache2}"
+: "${APACHE_PID_FILE:=${APACHE_RUN_DIR}/apache2.pid}"
+: "${APACHE_LOG_DIR:=/var/log/apache2}"
+: "${APACHE_RUN_USER:=www-data}"
+: "${APACHE_RUN_GROUP:=www-data}"
+export APACHE_RUN_DIR APACHE_PID_FILE APACHE_LOG_DIR APACHE_RUN_USER APACHE_RUN_GROUP
+mkdir -p "${APACHE_RUN_DIR}" "${APACHE_LOG_DIR}"
+
+# Robust: falls apache2.conf (durch Overlay/Paket) die Debian-Includes nicht enthält,
+# wird kein Modul geladen -> 'No MPM loaded'. Wir patchen das idempotent.
+if [ -f /etc/apache2/apache2.conf ]; then
+  if ! grep -q "Added by HA add-on container (fixes: AH00534 No MPM loaded)" /etc/apache2/apache2.conf; then
+    if ! grep -qE '^[[:space:]]*Include(Optional)?[[:space:]]+mods-enabled/\*\.load' /etc/apache2/apache2.conf; then
+      bashio::log.warning "apache2.conf fehlt mods-enabled Includes; patching..."
+    else
+      bashio::log.warning "apache2.conf hat mods-enabled Include, aber kein HA-Marker; patching trotzdem für conf/sites includes..."
+    fi
+    cat >>/etc/apache2/apache2.conf <<'EOF'
+
+# --- Added by HA add-on container (fixes: AH00534 No MPM loaded) ---
+IncludeOptional mods-enabled/*.load
+IncludeOptional mods-enabled/*.conf
+IncludeOptional conf-enabled/*.conf
+IncludeOptional sites-enabled/*.conf
+# --- End HA add-on patch ---
+EOF
+  fi
+fi
+
+# ---- DEBUG (must appear in add-on logs) ----
+bashio::log.warning "Apache debug: mods-enabled list follows"
+DBG_OUT="$(ls -la /etc/apache2/mods-enabled 2>&1 || true)"
+echo "$DBG_OUT" >&2 || true
+bashio::log.warning "$DBG_OUT" || true
+
+bashio::log.warning "Apache debug: conf-enabled list follows"
+DBG_OUT="$(ls -la /etc/apache2/conf-enabled 2>&1 || true)"
+echo "$DBG_OUT" >&2 || true
+bashio::log.warning "$DBG_OUT" || true
+
+bashio::log.warning "Apache debug: sites-enabled list follows"
+DBG_OUT="$(ls -la /etc/apache2/sites-enabled 2>&1 || true)"
+echo "$DBG_OUT" >&2 || true
+bashio::log.warning "$DBG_OUT" || true
+
+bashio::log.warning "Apache debug: apache2ctl -M"
+DBG_OUT="$(/usr/sbin/apache2ctl -M 2>&1 || true)"
+echo "$DBG_OUT" >&2 || true
+bashio::log.warning "$DBG_OUT" || true
+
+bashio::log.warning "Apache debug: apache2ctl -S"
+DBG_OUT="$(/usr/sbin/apache2ctl -S 2>&1 || true)"
+echo "$DBG_OUT" >&2 || true
+bashio::log.warning "$DBG_OUT" || true
+
+# Configtest
+CFGTEST_OUT="$(/usr/sbin/apache2ctl -t -f /etc/apache2/apache2-ha.conf 2>&1 || true)"
+echo "$CFGTEST_OUT" >&2 || true
+bashio::log.warning "$CFGTEST_OUT" | cat || true
+
+# Stream PHP error log (file) into s6 logs so we can actually see PHP fatals
+# The file is created on demand; tail -F tolerates missing files after -n0 once it exists.
+(
+  mkdir -p /data || true
+  touch /data/php-error.log || true
+  tail -n 0 -F /data/php-error.log >&2
+) &
+
+# Deterministic start: always use our hardened config
+exec /usr/sbin/apache2 -f /etc/apache2/apache2-ha.conf -D FOREGROUND

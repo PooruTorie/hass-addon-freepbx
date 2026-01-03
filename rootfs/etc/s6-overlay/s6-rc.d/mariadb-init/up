@@ -1,0 +1,4 @@
+#!/command/execlineb -S0
+
+with-contenv
+/usr/local/sbin/mariadb-init.sh

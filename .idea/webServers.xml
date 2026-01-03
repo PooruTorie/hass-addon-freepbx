@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="bdb61c85-55d3-4fb0-a4b5-18722b68419d" name="Hass" url="http://192.168.178.4:8123/hassio/dashboard">
+        <fileTransfer rootFolder="/addons" accessType="SFTP" host="192.168.178.4" port="22" sshConfigId="973bda71-e02a-458c-981a-9f4330a2b9f3" sshConfig="root@192.168.178.4:22 password">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>

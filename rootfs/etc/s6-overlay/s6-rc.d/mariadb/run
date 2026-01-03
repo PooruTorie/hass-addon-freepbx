@@ -1,0 +1,29 @@
+#!/usr/bin/with-contenv bashio
+set -euo pipefail
+
+bashio::log.info "Starte MariaDB (s6-rc)..."
+
+mkdir -p /run/mysqld
+chown -R mysql:mysql /run/mysqld
+
+# Start mysqld in background
+/usr/sbin/mysqld --user=mysql --console &
+MYSQLD_PID=$!
+
+# Notify s6 when MariaDB is ready.
+# -d: send readiness notification then exec the given prog (here: a no-op 'true')
+# -n 60: try up to 60 times
+# -s 1: sleep 1s between tries
+# -c: readiness check command (exit 0 when ready)
+s6-notifyoncheck -d -n 60 -s 1 -c 'sh -c "mysqladmin ping --silent >/dev/null 2>&1"' true
+bashio::log.info "MariaDB ready."
+
+# If mysqld died early, fail fast.
+if ! kill -0 "$MYSQLD_PID" 2>/dev/null; then
+  bashio::log.error "MariaDB ist vor Readiness beendet."
+  wait "$MYSQLD_PID" || true
+  exit 1
+fi
+
+# Foreground: wait for mysqld
+wait "$MYSQLD_PID"

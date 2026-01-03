@@ -36,6 +36,12 @@ RUN apt-get update && \
       nodejs npm ipset iptables fail2ban php-soap \
       cron
 
+# === OPUS INSTALL (Debian Bookworm - 100% FUNCTIONAL) ===
+RUN apt-get install -y \
+    libopus0 \
+    libopus-dev \
+    pkg-config
+
 # 4) Asterisk-Quellen holen
 RUN cd /usr/src && \
     wget -O asterisk-21-current.tar.gz \
@@ -44,20 +50,30 @@ RUN cd /usr/src && \
     mkdir -p /usr/src/asterisk && \
     tar -xvf asterisk-21-current.tar.gz -C /usr/src/asterisk --strip-components=1
 
-# 5) Asterisk-Abhängigkeiten & Konfiguration
+# 5) Asterisk Konfigurieren & bauen
 RUN cd /usr/src/asterisk && \
     contrib/scripts/get_mp3_source.sh && \
     contrib/scripts/install_prereq install && \
-    ./configure --libdir=/usr/lib64 --with-pjproject-bundled --with-jansson-bundled
-
-# 6) Asterisk bauen & installieren
-RUN cd /usr/src/asterisk && \
-    make menuselect && \
-    make && \
+    ./configure \
+      --libdir=/usr/lib64 \
+      --with-pjproject-bundled \
+      --with-jansson-bundled  \
+      --with-opus && \
+    make -j$(nproc) && \
     make install && \
     make samples && \
     make config && \
     ldconfig
+
+# 6) Opus Codec Modul installieren
+RUN cd /tmp && \
+    wget -O codec_opus.tar.gz "https://downloads.digium.com/pub/telephony/codec_opus/asterisk-21.0/x86-64/codec_opus-21.0-current-x86_64.tar.gz" && \
+    tar xzf codec_opus.tar.gz --strip-components=1&& \
+    cp codec_opus.so /usr/lib64/asterisk/modules/ && \
+    cp codec_opus_config-en_US.xml /var/lib/asterisk/documentation/ && \
+    ldconfig && \
+    echo "load => codec_opus.so" >> /etc/asterisk/modules.conf && \
+    echo "noload => format_ogg_opus.so" >> /etc/asterisk/modules.conf
 
 # In Containern schlagen ulimit/sysctl Änderungen oft fehl (keine Privileges).
 # safe_asterisk soll dann trotzdem weiterlaufen.
@@ -69,16 +85,16 @@ RUN if [ -f /usr/sbin/safe_asterisk ]; then \
 
 # 7) Asterisk-User/Gruppe anlegen
 RUN groupadd -r asterisk && \
-	useradd -r -d /var/lib/asterisk -g asterisk asterisk && \
-	usermod -aG audio,dialout asterisk
+    useradd -r -d /var/lib/asterisk -g asterisk asterisk && \
+    usermod -aG audio,dialout asterisk
 
 # 8) Verzeichnisse & Rechte für Asterisk
 RUN mkdir -p /var/lib/asterisk /var/log/asterisk /var/spool/asterisk && \
-	chown -R asterisk:asterisk /etc/asterisk && \
-	chown -R asterisk:asterisk /var/lib/asterisk /var/log/asterisk /var/spool/asterisk && \
-	chown -R asterisk:asterisk /usr/lib64/asterisk && \
-	bash -c 'echo "/usr/lib64" >> /etc/ld.so.conf.d/x86_64-linux-gnu.conf' && \
-	ldconfig
+    chown -R asterisk:asterisk /etc/asterisk && \
+    chown -R asterisk:asterisk /var/lib/asterisk /var/log/asterisk /var/spool/asterisk && \
+    chown -R asterisk:asterisk /usr/lib64/asterisk && \
+    bash -c 'echo "/usr/lib64" >> /etc/ld.so.conf.d/x86_64-linux-gnu.conf' && \
+    ldconfig
 
 # 9) Asterisk-Konfig auf User/Group asterisk umstellen
 RUN if [ -f /etc/default/asterisk ]; then \
@@ -105,16 +121,15 @@ RUN if [ -f /etc/apache2/apache2.conf ]; then \
     fi
 
 RUN a2enmod rewrite && \
-	systemctl disable apache2 && \
-	rm -f /etc/systemd/system/apache2.service && \
-	rm -f /var/www/html/index.html
+    systemctl disable apache2 && \
+    rm -f /etc/systemd/system/apache2.service && \
+    rm -f /var/www/html/index.html
 
 # 12) ODBC-Konfiguration
-# Robust in Docker (ohne heredocs), damit der Legacy-Builder nicht am EOF scheitert.
 COPY rootfs/etc/odbcinst.ini /etc/
 COPY rootfs/etc/odbc.ini /etc/
 
-# 14) FreePBX 17 herunterladen
+# 13) FreePBX 17 herunterladen
 RUN cd /usr/local/src && \
     wget -O freepbx-17.0-latest-EDGE.tgz \
       http://mirror.freepbx.org/modules/packages/freepbx/freepbx-17.0-latest-EDGE.tgz && \
@@ -129,12 +144,12 @@ RUN apt-get install -y cron && \
     chmod u+s /usr/bin/crontab && \
     usermod -aG crontab asterisk
 
-# 15) FreePBX installieren
+# 14) FreePBX installieren
 RUN service mariadb start && \
     mysql -u root -e "SET GLOBAL innodb_file_per_table=1;" && \
     service cron start && \
     sleep 2 && \
- 	cd /usr/local/src/freepbx && \
+    cd /usr/local/src/freepbx && \
     ./start_asterisk start && \
     ./install -n --user asterisk --group asterisk && \
     fwconsole ma installall && \
@@ -142,10 +157,10 @@ RUN service mariadb start && \
     fwconsole restart && \
     service cron stop || true
 
-# 16) Aufräumen systemd-Unit
+# 15) Aufräumen systemd-Unit
 RUN rm -f /etc/systemd/system/freepbx.service || true
 
-# 17) s6-rootfs kopieren
+# 16) s6-rootfs kopieren
 COPY rootfs/ /
 
 RUN find /etc/s6-overlay/s6-rc.d -name "run" -exec chmod +x {} + && \

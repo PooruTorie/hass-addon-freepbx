@@ -1,9 +1,9 @@
-#!/usr/bin/with-contenv bash
+#!/usr/bin/with-contenv bashio
 set -euo pipefail
 
-echo "=== MariaDB Pre-Start ==="
+bashio::log.info "=== MariaDB Pre-Start ==="
 
-DATADIR="/share/mariadb"
+DATADIR="/data/mariadb"
 LEGACY_DATADIR="/var/lib/mysql"
 
 mkdir -p /var/run/mysqld "${DATADIR}"
@@ -14,7 +14,7 @@ chmod 750 "${DATADIR}" || true
 # migrieren wir es einmalig nach /share.
 if [ -d "${LEGACY_DATADIR}" ] && [ ! -L "${LEGACY_DATADIR}" ]; then
   if [ ! -d "${DATADIR}/mysql" ] && [ -e "${LEGACY_DATADIR}/mysql" -o -e "${LEGACY_DATADIR}/ibdata1" ]; then
-    echo "MariaDB: migriere bestehende Daten von ${LEGACY_DATADIR} nach ${DATADIR} ..."
+    bashio::log.info "MariaDB: migriere bestehende Daten von ${LEGACY_DATADIR} nach ${DATADIR} ..."
     # rsync ist nicht garantiert installiert; cp -a ist hier ausreichend.
     cp -a "${LEGACY_DATADIR}/." "${DATADIR}/" || true
     chown -R mysql:mysql "${DATADIR}"
@@ -35,12 +35,12 @@ fi
 
 # Erste Initialisierung (jetzt im persistenten Datadir)
 if [ ! -d "${DATADIR}/mysql" ] && [ ! -f "${DATADIR}/ibdata1" ]; then
-  echo "MariaDB erste Initialisierung in ${DATADIR} ..."
+  bashio::log.info "MariaDB erste Initialisierung in ${DATADIR} ..."
   mysqld --initialize-insecure --user=mysql --datadir="${DATADIR}"
   chown -R mysql:mysql "${DATADIR}"
 fi
 
-echo "MariaDB Pre-Start abgeschlossen"
+bashio::log.info "MariaDB Pre-Start abgeschlossen"
 
 exec /usr/sbin/mysqld \
   --user=mysql \

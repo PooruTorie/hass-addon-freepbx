@@ -1,1 +1,5 @@
 share
+# local runtime data
+share/
+.share-test/
+

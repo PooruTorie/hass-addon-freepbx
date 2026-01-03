@@ -1,8 +1,24 @@
-#!/usr/bin/with-contenv bash
-echo "=== FreePBX Pre-Start ==="
+#!/usr/bin/with-contenv bashio
+set -euo pipefail
 
-# 1. Socket-Symlink (FreePBX erwartet diesen Pfad)
-ln -sf /run/mysqld/mysqld.sock /var/run/mysqld/mysqld.sock
+options=$(bashio::addon.options)
+key='apache_port'
+if bashio::jq.exists "${options}" ".${key}"; then
+  APACHE_PORT=$(bashio::jq "${options}" ".${key}")
+fi
+
+# Apache auf den gewünschten Port umstellen
+if [ -f /etc/apache2/ports.conf ]; then
+  # Listen-Zeile aktualisieren (HTTP)
+  sed -i -E "s/^\s*Listen\s+[0-9]+\s*$/Listen ${APACHE_PORT}/" /etc/apache2/ports.conf
+fi
+
+# VirtualHost Port anpassen
+if [ -f /etc/apache2/sites-available/000-default.conf ]; then
+  sed -i -E "s/<VirtualHost\s+\*:[0-9]+>/<VirtualHost *:${APACHE_PORT}>/" /etc/apache2/sites-available/000-default.conf
+fi
+
+bashio::log.info "Apache wird auf Port ${APACHE_PORT} gestartet"
 
 # 1. Verzeichnisse
 mkdir -p /var/lib/asterisk{,/sounds,/logs,/monitor,/tmp}
@@ -37,6 +53,6 @@ fwconsole chown
 fwconsole reload 2>/dev/null || true
 fwconsole util resetcerts 2>/dev/null || true
 
-echo "FreePBX Pre-Start abgeschlossen"
+bashio::log.info "FreePBX Pre-Start abgeschlossen"
 
 exec /usr/sbin/apachectl -D FOREGROUND

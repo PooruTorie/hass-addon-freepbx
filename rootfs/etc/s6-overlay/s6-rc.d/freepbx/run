@@ -1,0 +1,42 @@
+#!/usr/bin/with-contenv bash
+echo "=== FreePBX Pre-Start ==="
+
+# 1. Socket-Symlink (FreePBX erwartet diesen Pfad)
+ln -sf /run/mysqld/mysqld.sock /var/run/mysqld/mysqld.sock
+
+# 1. Verzeichnisse
+mkdir -p /var/lib/asterisk{,/sounds,/logs,/monitor,/tmp}
+mkdir -p /var/log/{asterisk,pbx} /var/spool/asterisk/{tmp,monitor}
+mkdir -p /var/spool/cron/crontabs /var/run/asterisk
+
+# 2. Rechte korrigieren (OHNE su-exec)
+chown -R asterisk:asterisk \
+  /var/lib/asterisk \
+  /var/log/asterisk /var/spool/asterisk \
+  /var/log/pbx \
+  /etc/asterisk \
+  /usr/lib64/asterisk \
+  /var/www/html/admin/modules \
+  /var/run/asterisk
+
+chown root:crontab /var/spool/cron/crontabs
+chmod 1730 /var/spool/cron/crontabs
+chmod u+s /usr/bin/crontab 2>/dev/null || true
+
+# 5. Apache DocumentRoot
+chown -R asterisk:asterisk /var/www/html
+
+# 6. Cronjobs Rechte
+if [ -f /var/spool/cron/crontabs/asterisk ]; then
+  chmod 600 /var/spool/cron/crontabs/asterisk
+  chown asterisk:crontab /var/spool/cron/crontabs/asterisk
+fi
+
+# 4. fwconsole jetzt ausführen (DB läuft garantiert)
+fwconsole chown
+fwconsole reload 2>/dev/null || true
+fwconsole util resetcerts 2>/dev/null || true
+
+echo "FreePBX Pre-Start abgeschlossen"
+
+exec /usr/sbin/apachectl -D FOREGROUND

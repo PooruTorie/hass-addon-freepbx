@@ -1,29 +1,48 @@
-#!/usr/bin/with-contenv bashio
+#!/usr/bin/with-contenv bash
 set -euo pipefail
 
-bashio::log.info "Starte MariaDB (s6-rc)..."
+echo "=== MariaDB Pre-Start ==="
 
-mkdir -p /run/mysqld
-chown -R mysql:mysql /run/mysqld
+DATADIR="/share/mariadb"
+LEGACY_DATADIR="/var/lib/mysql"
 
-# Start mysqld in background
-/usr/sbin/mysqld --user=mysql --console &
-MYSQLD_PID=$!
+mkdir -p /var/run/mysqld "${DATADIR}"
+chown -R mysql:mysql /var/run/mysqld "${DATADIR}"
+chmod 750 "${DATADIR}" || true
 
-# Notify s6 when MariaDB is ready.
-# -d: send readiness notification then exec the given prog (here: a no-op 'true')
-# -n 60: try up to 60 times
-# -s 1: sleep 1s between tries
-# -c: readiness check command (exit 0 when ready)
-s6-notifyoncheck -d -n 60 -s 1 -c 'sh -c "mysqladmin ping --silent >/dev/null 2>&1"' true
-bashio::log.info "MariaDB ready."
-
-# If mysqld died early, fail fast.
-if ! kill -0 "$MYSQLD_PID" 2>/dev/null; then
-  bashio::log.error "MariaDB ist vor Readiness beendet."
-  wait "$MYSQLD_PID" || true
-  exit 1
+# Wenn ein Legacy-Datadir existiert (z.B. aus dem Image-Build oder alten Containern),
+# migrieren wir es einmalig nach /share.
+if [ -d "${LEGACY_DATADIR}" ] && [ ! -L "${LEGACY_DATADIR}" ]; then
+  if [ ! -d "${DATADIR}/mysql" ] && [ -e "${LEGACY_DATADIR}/mysql" -o -e "${LEGACY_DATADIR}/ibdata1" ]; then
+    echo "MariaDB: migriere bestehende Daten von ${LEGACY_DATADIR} nach ${DATADIR} ..."
+    # rsync ist nicht garantiert installiert; cp -a ist hier ausreichend.
+    cp -a "${LEGACY_DATADIR}/." "${DATADIR}/" || true
+    chown -R mysql:mysql "${DATADIR}"
+  fi
 fi
 
-# Foreground: wait for mysqld
-wait "$MYSQLD_PID"
+# Kompatibilität: viele Tools erwarten /var/lib/mysql. Symlink macht das transparent.
+# (Wenn /var/lib/mysql schon ein Verzeichnis mit Inhalt ist, lassen wir es bestehen,
+#  aber der mysqld wird trotzdem mit --datadir gestartet.)
+if [ -d "${LEGACY_DATADIR}" ] && [ ! -L "${LEGACY_DATADIR}" ]; then
+  if [ -z "$(ls -A "${LEGACY_DATADIR}" 2>/dev/null || true)" ]; then
+    rmdir "${LEGACY_DATADIR}" 2>/dev/null || true
+  fi
+fi
+if [ ! -e "${LEGACY_DATADIR}" ]; then
+  ln -s "${DATADIR}" "${LEGACY_DATADIR}" || true
+fi
+
+# Erste Initialisierung (jetzt im persistenten Datadir)
+if [ ! -d "${DATADIR}/mysql" ] && [ ! -f "${DATADIR}/ibdata1" ]; then
+  echo "MariaDB erste Initialisierung in ${DATADIR} ..."
+  mysqld --initialize-insecure --user=mysql --datadir="${DATADIR}"
+  chown -R mysql:mysql "${DATADIR}"
+fi
+
+echo "MariaDB Pre-Start abgeschlossen"
+
+exec /usr/sbin/mysqld \
+  --user=mysql \
+  --datadir="${DATADIR}" \
+  --skip-networking

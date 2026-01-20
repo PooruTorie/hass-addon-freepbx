@@ -1,0 +1,41 @@
+#!/usr/bin/with-contenv bashio
+set -euo pipefail
+
+# Persistente Asterisk-Konfiguration nach /data spiegeln.
+# FreePBX schreibt seine generierten Configs standardmäßig nach /etc/asterisk.
+# Wenn /etc/asterisk nicht persistent ist, gehen "Advanced Settings" und manuelle
+# Anpassungen nach Neustarts verloren.
+
+PERSIST_BASE="/data/asterisk"
+PERSIST_ETC="${PERSIST_BASE}/etc"
+TARGET_ETC="/etc/asterisk"
+
+bashio::log.info "Asterisk: Stelle sicher, dass ${TARGET_ETC} persistent ist (${PERSIST_ETC})"
+
+mkdir -p "${PERSIST_ETC}"
+
+# Wenn /etc/asterisk ein echtes Verzeichnis ist (Default aus Image) und im persistenten
+# Ziel noch nichts liegt, migrieren wir einmalig die vorhandenen Dateien.
+if [ -d "${TARGET_ETC}" ] && [ ! -L "${TARGET_ETC}" ]; then
+  if [ -z "$(ls -A "${PERSIST_ETC}" 2>/dev/null || true)" ] && [ -n "$(ls -A "${TARGET_ETC}" 2>/dev/null || true)" ]; then
+    bashio::log.info "Asterisk: migriere initiale Configs von ${TARGET_ETC} nach ${PERSIST_ETC} ..."
+    cp -a "${TARGET_ETC}/." "${PERSIST_ETC}/" || true
+  fi
+
+  # leeren Ordner entfernen, damit Symlink gesetzt werden kann
+  if [ -z "$(ls -A "${TARGET_ETC}" 2>/dev/null || true)" ]; then
+    rmdir "${TARGET_ETC}" 2>/dev/null || true
+  fi
+fi
+
+# Symlink setzen, falls nötig
+if [ ! -L "${TARGET_ETC}" ]; then
+  rm -rf "${TARGET_ETC}" 2>/dev/null || true
+  ln -s "${PERSIST_ETC}" "${TARGET_ETC}"
+fi
+
+# Ownership, damit FreePBX/fwconsole schreiben kann
+chown -R asterisk:asterisk "${PERSIST_BASE}" || true
+
+bashio::log.info "Asterisk: Persistenz-Setup abgeschlossen"
+

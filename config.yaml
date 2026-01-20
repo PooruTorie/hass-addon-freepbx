@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/add-ons/configuration#add-on-config
 name: FreePBX
-version: "0.1.11"
+version: "0.1.12"
 slug: freepbx17
 description: "FreePBX als Home Assistant OS Add-on"
 url: "https://github.com/PooruTorie/hass-addon-freepbx"
@@ -12,6 +12,9 @@ init: false
 host_network: true
 audio: false
 backup: cold
+
+ingress: true
+ingress_port: 8080
 
 options:
     apache_port: 8080

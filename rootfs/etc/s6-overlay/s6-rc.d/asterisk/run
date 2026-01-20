@@ -1,2 +1,11 @@
-#!/usr/bin/with-contenv bash
+#!/usr/bin/with-contenv bashio
+
+set -euo pipefail
+
+# Sicherstellen, dass /etc/asterisk persistent nach /data umgebogen ist.
+# (Im Image ist /etc/asterisk nicht persistent und würde nach Neustarts zurückgesetzt.)
+if [ -x /etc/s6-overlay/s6-rc.d/asterisk/pre-init ]; then
+  /etc/s6-overlay/s6-rc.d/asterisk/pre-init || true
+fi
+
 exec s6-setuidgid asterisk asterisk /usr/sbin/asterisk -f -U asterisk
